@@ -1,162 +1,185 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
-  FileText,
-  CheckCircle2,
-  Clock,
-  ChevronRight,
-  Activity
+  FileText, AlertTriangle, CheckCircle2, XCircle,
+  Clock, BookOpen, Shield, ChevronRight, Eye, Compass
 } from 'lucide-react';
+import DrawingsSection from './DrawingsSection';
 
-export default function RightDrawer({ response, activeTab, setActiveTab }) {
-  const documents = [
-    { name: 'SOP-017 - Pump Maintenance', page: 'Page 4 • Section 3.2', badge: 'Most relevant', type: 'pdf' },
-    { name: 'P-204 Manual', page: 'Page 28 • Vibration Limits', type: 'pdf' },
-    { name: 'Maintenance History', page: 'Page 6 • 12 Mar 2025', type: 'pdf' },
-    { name: 'Plant_Piping_P204.pdf', page: 'Page 2 • P&ID', type: 'blue' },
-    { name: 'Inspection_Report_P204.pdf', page: 'Page 3 • Last Inspection', type: 'green' }
-  ];
+const SAMPLE_CITATIONS = [
+  { doc: 'MaintManual_Rev3.pdf', page: 14, score: 0.94, excerpt: 'Bearing wear pattern classification Level 1-3 based on vibration amplitude thresholds...' },
+  { doc: 'TelemetryLog_C204.csv', page: 1, score: 0.88, excerpt: 'Compressor C-204 vibration readings 2024-Q3: peak 4.2g at 847 operating hours...' },
+  { doc: 'SOP_CompressorMaint.pdf', page: 8, score: 0.82, excerpt: 'Standard procedure for compressor bearing inspection and replacement schedule...' },
+];
 
-  const agentTrace = [
-    { step: 1, title: 'Understand Request', desc: 'Parsed equipment ID: P-204, intent: diagnosis', done: true },
-    { step: 2, title: 'Retrieve Evidence', desc: 'Found 5 relevant documents (SOP, Manual, History)', done: true },
-    { step: 3, title: 'Analyze & Reason', desc: 'Identified vibration as primary issue', done: true },
-    { step: 4, title: 'Check Constraints', desc: 'Verified safety and policy constraints', done: true },
-    { step: 5, title: 'Propose Action', desc: 'Generated maintenance plan (requires approval)', done: true },
-    { step: 6, title: 'Awaiting Human Approval', desc: 'Action pending user confirmation', pending: true }
-  ];
+const SAMPLE_HITL = {
+  taskId: 'TASK-2024-0891',
+  created: '2026-09-19 21:48:03',
+  risk: 'high',
+  description: 'PLC ladder logic safety interlock bypass detected at Line 891. Automatic correction has been staged but requires human approval before deployment.',
+  proposedAction: 'Revert Line 891 to safety interlock ON state and flag for code review.',
+  approvedBy: null,
+};
+
+function ContextTab({ response, onOpenDoc }) {
+  const citations = response?.meta?.citations?.length ? response.meta.citations : SAMPLE_CITATIONS;
+  return (
+    <div className="wb-drawer-content">
+      <div className="wb-drawer-section-title"><BookOpen size={13} /> Retrieved Sources</div>
+      {citations.map((c, i) => (
+        <div
+          key={i}
+          className="wb-citation-card clickable"
+          onClick={() => onOpenDoc?.(c)}
+          title="Click to view full document & citation page"
+        >
+          <div className="wb-citation-top">
+            <FileText size={13} />
+            <span className="wb-citation-doc">{c.doc}</span>
+            <span className="wb-citation-page">p.{c.page}</span>
+            <span className="wb-citation-score">{(c.score * 100).toFixed(0)}%</span>
+            <span className="wb-citation-view-hint"><Eye size={11} /> View</span>
+          </div>
+          {c.excerpt && <p className="wb-citation-excerpt">{c.excerpt}</p>}
+        </div>
+      ))}
+      {response?.meta?.risk && (
+        <div className="wb-drawer-section-title" style={{ marginTop: '20px' }}><Shield size={13} /> Risk Assessment</div>
+      )}
+      {response?.meta?.risk && (
+        <div className={`wb-risk-card level-${response.meta.risk}`}>
+          <div className="wb-risk-level">
+            {response.meta.risk === 'high' && <AlertTriangle size={16} />}
+            {response.meta.risk === 'medium' && <Clock size={16} />}
+            {response.meta.risk === 'low' && <CheckCircle2 size={16} />}
+            Risk Level: <strong>{response.meta.risk?.toUpperCase()}</strong>
+          </div>
+          {response.meta.risk === 'high' && (
+            <p className="wb-risk-note">HITL approval required before any action is taken.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HITLTab({ currentUser }) {
+  const [decision, setDecision] = useState(null);
+  const [comment, setComment] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = (dec) => {
+    setDecision(dec);
+    setSubmitted(true);
+  };
+
+  if (submitted) {
+    return (
+      <div className="wb-drawer-content">
+        <div className="wb-hitl-success">
+          {decision === 'approve' ? <CheckCircle2 size={40} /> : <XCircle size={40} />}
+          <div className="wb-hitl-success-title">
+            {decision === 'approve' ? 'Approved' : 'Rejected'}
+          </div>
+          <div className="wb-hitl-success-sub">
+            Decision recorded by {currentUser?.name}. Audit ledger updated.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <aside className="right-drawer">
-      {/* Tab Navigation */}
-      <div className="drawer-tabs">
-        <button
-          className={`drawer-tab ${activeTab === 'context' ? 'active' : ''}`}
-          onClick={() => setActiveTab('context')}
-        >
-          Context
-        </button>
-        <button
-          className={`drawer-tab ${activeTab === 'documents' ? 'active' : ''}`}
-          onClick={() => setActiveTab('documents')}
-        >
-          Documents (5)
-        </button>
-        <button
-          className={`drawer-tab ${activeTab === 'agent_trace' ? 'active' : ''}`}
-          onClick={() => setActiveTab('agent_trace')}
-        >
-          Agent Trace
-        </button>
-        <button
-          className={`drawer-tab ${activeTab === 'tools' ? 'active' : ''}`}
-          onClick={() => setActiveTab('tools')}
-        >
-          Tools
-        </button>
-      </div>
-
-      <div className="drawer-body">
-        {/* Relevant Documents Section */}
-        <div className="drawer-section">
-          <div className="section-header">
-            <h3>Relevant Documents</h3>
-            <a href="#viewall" className="view-all-link">View all</a>
-          </div>
-
-          <div className="doc-item-list">
-            {documents.map((doc, idx) => (
-              <div key={idx} className="doc-card-item">
-                <div className={`doc-icon ${doc.type}`}>
-                  <FileText size={16} />
-                </div>
-                <div className="doc-info">
-                  <div className="doc-name">{doc.name}</div>
-                  <div className="doc-page">{doc.page}</div>
-                </div>
-                {doc.badge && <span className="doc-badge-relevant">{doc.badge}</span>}
-                <ChevronRight size={14} className="doc-arrow" />
-              </div>
-            ))}
-          </div>
+    <div className="wb-drawer-content">
+      <div className="wb-drawer-section-title"><AlertTriangle size={13} /> Pending HITL Review</div>
+      <div className="wb-hitl-card">
+        <div className="wb-hitl-header">
+          <span className="wb-hitl-task-id">{SAMPLE_HITL.taskId}</span>
+          <span className="wb-hitl-ts">{SAMPLE_HITL.created}</span>
         </div>
-
-        <div className="drawer-divider" />
-
-        {/* Agent Reasoning Trace */}
-        <div className="drawer-section">
-          <div className="section-header">
-            <h3>Agent Reasoning Trace</h3>
-            <a href="#viewtrace" className="view-all-link">View full trace</a>
-          </div>
-
-          <div className="trace-list">
-            {agentTrace.map((item, idx) => (
-              <div key={idx} className="trace-item-row">
-                <div className="trace-left">
-                  {item.done ? (
-                    <div className="step-circle done">
-                      <CheckCircle2 size={14} color="#10b981" />
-                    </div>
-                  ) : (
-                    <div className="step-circle pending">
-                      <Clock size={14} color="#f59e0b" />
-                    </div>
-                  )}
-                  {idx < agentTrace.length - 1 && <div className="trace-line" />}
-                </div>
-                <div className="trace-content">
-                  <div className="trace-title">
-                    <span>{item.step}. {item.title}</span>
-                  </div>
-                  <div className="trace-desc">{item.desc}</div>
-                </div>
-                <ChevronRight size={14} className="doc-arrow" />
-              </div>
-            ))}
-          </div>
+        <div className="wb-hitl-risk-badge">HIGH RISK</div>
+        <p className="wb-hitl-desc">{SAMPLE_HITL.description}</p>
+        <div className="wb-hitl-action">
+          <div className="wb-hitl-action-label">Proposed Action:</div>
+          <div className="wb-hitl-action-text">{SAMPLE_HITL.proposedAction}</div>
         </div>
-
-        <div className="drawer-divider" />
-
-        {/* Equipment Details Card */}
-        <div className="drawer-section">
-          <div className="section-header">
-            <h3>Equipment Details</h3>
-            <a href="#knowledge" className="view-all-link">View in Knowledge Hub</a>
-          </div>
-
-          <div className="equipment-card">
-            <div className="equipment-card-header">
-              <div className="equipment-icon-bg">
-                <Activity size={20} color="#3b82f6" />
-              </div>
-              <div className="equipment-tag-info">
-                <h4>P-204</h4>
-                <span className="running-pill">• Running</span>
-              </div>
-            </div>
-
-            <div className="equipment-grid">
-              <div className="eq-box">
-                <span className="eq-label">Type</span>
-                <span className="eq-val">Centrifugal Pump</span>
-              </div>
-              <div className="eq-box">
-                <span className="eq-label">Location</span>
-                <span className="eq-val">Process Line A</span>
-              </div>
-              <div className="eq-box">
-                <span className="eq-label">Last Maintenance</span>
-                <span className="eq-val">12 Mar 2025</span>
-              </div>
-              <div className="eq-box">
-                <span className="eq-label">Next Service</span>
-                <span className="eq-val">Due in 18 days</span>
-              </div>
-            </div>
-          </div>
+        <textarea
+          className="wb-hitl-comment"
+          placeholder="Add review comment (optional)..."
+          value={comment}
+          onChange={e => setComment(e.target.value)}
+          rows={3}
+        />
+        <div className="wb-hitl-actions">
+          <button className="wb-hitl-btn approve" onClick={() => handleSubmit('approve')}>
+            <CheckCircle2 size={14} /> Approve
+          </button>
+          <button className="wb-hitl-btn reject" onClick={() => handleSubmit('reject')}>
+            <XCircle size={14} /> Reject
+          </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function AuditTab() {
+  const logs = [
+    { time: '21:48:03', user: 'PS', action: 'RAG Query', doc: 'MaintManual_Rev3.pdf', risk: 'low' },
+    { time: '21:46:31', user: 'RK', action: 'HITL Approve', doc: 'TASK-0890', risk: 'high' },
+    { time: '21:44:12', user: 'AM', action: 'Audit Export', doc: 'AuditLog_Sep.csv', risk: 'medium' },
+    { time: '21:41:57', user: 'SI', action: 'Document Upload', doc: 'FleetData_Q3.xlsx', risk: 'low' },
+    { time: '21:38:20', user: 'VS', action: 'SOP Retrieval', doc: 'SOP_Pump_Maint.pdf', risk: 'low' },
+  ];
+  const riskColor = { low: '#22c55e', medium: '#f59e0b', high: '#ef4444' };
+
+  return (
+    <div className="wb-drawer-content">
+      <div className="wb-drawer-section-title"><Eye size={13} /> Immutable Audit Trail</div>
+      {logs.map((l, i) => (
+        <div key={i} className="wb-audit-row">
+          <span className="wb-audit-time">{l.time}</span>
+          <div className="wb-audit-avatar">{l.user}</div>
+          <div className="wb-audit-info">
+            <span className="wb-audit-action">{l.action}</span>
+            <span className="wb-audit-doc">{l.doc}</span>
+          </div>
+          <span className="wb-audit-dot" style={{ background: riskColor[l.risk] }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const TABS = [
+  { key: 'context',  label: 'Context',  Icon: BookOpen },
+  { key: 'drawings', label: 'Drawings', Icon: Compass },
+  { key: 'hitl',     label: 'HITL',     Icon: AlertTriangle },
+  { key: 'audit',    label: 'Audit',    Icon: Eye },
+];
+
+export default function RightDrawer({ response, activeTab, setActiveTab, currentUser, onSendToChat, onOpenItem }) {
+  return (
+    <aside className={`wb-drawer${activeTab === 'drawings' ? ' expanded' : ''}`}>
+      <div className="wb-drawer-tabs">
+        {TABS.map(t => {
+          const Icon = t.Icon;
+          return (
+            <button
+              key={t.key}
+              className={`wb-drawer-tab${activeTab === t.key ? ' active' : ''}`}
+              onClick={() => setActiveTab(t.key)}
+            >
+              <Icon size={13} />
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeTab === 'context'  && <ContextTab response={response} onOpenDoc={onOpenItem} />}
+      {activeTab === 'drawings' && <DrawingsSection onSendToChat={onSendToChat} onOpenDrawing={onOpenItem} />}
+      {activeTab === 'hitl'     && <HITLTab currentUser={currentUser} />}
+      {activeTab === 'audit'    && <AuditTab />}
     </aside>
   );
 }

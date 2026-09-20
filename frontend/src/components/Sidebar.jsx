@@ -1,146 +1,134 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
-  Wrench,
-  FileCheck,
-  Compass,
-  Cpu,
-  Layers,
-  Database,
-  Hammer,
-  Wrench as ToolIcon,
-  Shield,
-  FileText,
-  Lock,
-  ChevronDown,
-  ChevronRight,
-  Activity
+  Cpu, Database, Eye, Code2, FileText, Settings,
+  ChevronDown, ChevronRight, Bot, Zap, Shield, Activity,
+  BookOpen, Upload, History, AlertCircle, Compass
 } from 'lucide-react';
 
-export default function Sidebar({ activeModel, setActiveModel }) {
+const WORKSPACES = [
+  { id: 'maint',   label: 'Maintenance Intelligence', icon: Cpu },
+  { id: 'inspect', label: 'Equipment Inspection',     icon: Eye },
+  { id: 'code',    label: 'Code Analysis',            icon: Code2 },
+  { id: 'docs',    label: 'Document Intelligence',    icon: FileText },
+  { id: 'risk',    label: 'Risk Assessment',          icon: Shield },
+];
+
+const MODELS = [
+  { id: 'Llama 3.1 8B',    label: 'Llama 3.1 8B',    tag: 'TEXT' },
+  { id: 'Qwen2.5 7B',      label: 'Qwen2.5 7B',      tag: 'TEXT' },
+  { id: 'Qwen-Coder 7B',   label: 'Qwen-Coder 7B',   tag: 'CODE' },
+  { id: 'Qwen2-VL 7B',     label: 'Qwen2-VL 7B',     tag: 'VISION' },
+  { id: 'Mistral 7B',      label: 'Mistral 7B',       tag: 'TEXT' },
+];
+
+const QUICK_ACTIONS = [
+  { icon: Compass,     label: 'Engineering Drawings', tab: 'drawings' },
+  { icon: Upload,      label: 'Upload Blueprint',     tab: 'drawings' },
+  { icon: BookOpen,    label: 'Knowledge Base',        tab: 'context' },
+  { icon: AlertCircle, label: 'HITL Approvals',        tab: 'hitl' },
+];
+
+export default function Sidebar({ activeWorkspace, setActiveWorkspace, activeModel, setActiveModel, onNavigateTab }) {
+  const [wsOpen, setWsOpen] = useState(true);
+  const [modelOpen, setModelOpen] = useState(true);
+
   return (
-    <aside className="sidebar">
-      {/* Workspaces Section */}
-      <div className="sidebar-group">
-        <div className="sidebar-group-header">
+    <aside className="wb-sidebar">
+      {/* Workspace Selector */}
+      <div className="wb-sidebar-section">
+        <button className="wb-sidebar-section-hdr" onClick={() => setWsOpen(!wsOpen)}>
+          <Bot size={14} />
           <span>Workspaces</span>
-          <ChevronDown size={14} />
-        </div>
-
-        <nav className="nav-list">
-          <div className="nav-item active">
-            <Wrench size={18} />
-            <div className="nav-text">
-              <span className="nav-title">Maintenance Intelligence</span>
-              <span className="nav-sub">Diagnose • Plan • Execute</span>
-            </div>
+          {wsOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </button>
+        {wsOpen && (
+          <div className="wb-sidebar-list">
+            {WORKSPACES.map(ws => {
+              const Icon = ws.icon;
+              const active = activeWorkspace === ws.label;
+              return (
+                <button
+                  key={ws.id}
+                  className={`wb-sidebar-item${active ? ' active' : ''}`}
+                  onClick={() => setActiveWorkspace(ws.label)}
+                >
+                  <Icon size={14} />
+                  <span>{ws.label}</span>
+                  {active && <span className="wb-sidebar-active-dot" />}
+                </button>
+              );
+            })}
           </div>
-
-          <div className="nav-item">
-            <FileCheck size={18} />
-            <div className="nav-text">
-              <span className="nav-title">SOP Assistant</span>
-              <span className="nav-sub">Find and follow procedures</span>
-            </div>
-          </div>
-
-          <div className="nav-item">
-            <Compass size={18} />
-            <div className="nav-text">
-              <span className="nav-title">Engineering Knowledge</span>
-              <span className="nav-sub">P&IDs • Manuals • Drawings</span>
-            </div>
-          </div>
-
-          <div className="nav-item">
-            <Cpu size={18} />
-            <div className="nav-text">
-              <span className="nav-title">Custom Agent</span>
-              <span className="nav-sub">Create your own agent</span>
-            </div>
-          </div>
-        </nav>
+        )}
       </div>
 
-      <div className="sidebar-divider" />
-
-      {/* Tools & Modules Nav */}
-      <nav className="nav-list secondary-nav">
-        <div className="nav-item-simple">
-          <Layers size={18} />
-          <span>Model Hub</span>
-        </div>
-
-        <div className="nav-item-simple">
-          <Database size={18} />
-          <span>Knowledge Hub</span>
-          <ChevronRight size={14} className="nav-arrow" />
-        </div>
-
-        <div className="nav-item-simple">
-          <Hammer size={18} />
-          <span>Agent Builder</span>
-          <ChevronRight size={14} className="nav-arrow" />
-        </div>
-
-        <div className="nav-item-simple">
-          <ToolIcon size={18} />
-          <span>Tool Hub</span>
-          <ChevronRight size={14} className="nav-arrow" />
-        </div>
-
-        <div className="nav-item-simple">
-          <Shield size={18} />
-          <span>Governance</span>
-          <ChevronRight size={14} className="nav-arrow" />
-        </div>
-
-        <div className="nav-item-simple">
-          <FileText size={18} />
-          <span>Audit & Logs</span>
-          <ChevronRight size={14} className="nav-arrow" />
-        </div>
-
-        <div className="nav-item-simple">
-          <Lock size={18} />
-          <span>Sovereignty Center</span>
-          <ChevronRight size={14} className="nav-arrow" />
-        </div>
-      </nav>
-
-      <div className="sidebar-divider" />
-
-      {/* Recent Agents */}
-      <div className="sidebar-group">
-        <div className="sidebar-group-header">
-          <span>Recent Agents</span>
-        </div>
-        <div className="recent-agent-list">
-          <div className="recent-agent-item active">
-            <div className="agent-icon-badge">M</div>
-            <span>Maintenance Intelligence</span>
-            <span className="active-dot-text">Active</span>
+      {/* Model Selector */}
+      <div className="wb-sidebar-section">
+        <button className="wb-sidebar-section-hdr" onClick={() => setModelOpen(!modelOpen)}>
+          <Zap size={14} />
+          <span>Local Models</span>
+          {modelOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </button>
+        {modelOpen && (
+          <div className="wb-sidebar-list">
+            {MODELS.map(m => {
+              const active = activeModel === m.id;
+              return (
+                <button
+                  key={m.id}
+                  className={`wb-sidebar-item model-item${active ? ' active' : ''}`}
+                  onClick={() => setActiveModel(m.id)}
+                >
+                  <span className={`wb-model-tag tag-${m.tag.toLowerCase()}`}>{m.tag}</span>
+                  <span>{m.label}</span>
+                  {active && <span className="wb-sidebar-active-dot" />}
+                </button>
+              );
+            })}
           </div>
+        )}
+      </div>
 
-          <div className="recent-agent-item">
-            <div className="agent-icon-badge idle">S</div>
-            <span>SOP Assistant</span>
-            <span className="idle-text">Idle</span>
-          </div>
-
-          <div className="recent-agent-item">
-            <div className="agent-icon-badge idle">P</div>
-            <span>P&ID Analyzer</span>
-            <span className="idle-text">Idle</span>
-          </div>
+      {/* Quick Actions */}
+      <div className="wb-sidebar-section">
+        <div className="wb-sidebar-section-hdr" style={{ cursor: 'default' }}>
+          <Activity size={14} />
+          <span>Quick Actions</span>
+        </div>
+        <div className="wb-sidebar-list">
+          {QUICK_ACTIONS.map((a, i) => {
+            const Icon = a.icon;
+            return (
+              <button
+                key={i}
+                className="wb-sidebar-item action-item"
+                onClick={() => onNavigateTab?.(a.tab || 'context')}
+              >
+                <Icon size={14} />
+                <span>{a.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      <div className="sidebar-footer">
-        <div className="system-health-card">
-          <Activity size={16} color="#10b981" />
-          <div>
-            <div className="health-title">System Health</div>
-            <div className="health-sub">All systems operational</div>
+      {/* System Status Mini */}
+      <div className="wb-sidebar-footer">
+        <div className="wb-sidebar-sys">
+          <div className="wb-sys-row">
+            <Database size={12} />
+            <span>ChromaDB</span>
+            <span className="wb-sys-dot offline" />
+          </div>
+          <div className="wb-sys-row">
+            <Cpu size={12} />
+            <span>Ollama</span>
+            <span className="wb-sys-dot offline" />
+          </div>
+          <div className="wb-sys-row">
+            <Shield size={12} />
+            <span>Egress</span>
+            <span className="wb-sys-val">0 calls</span>
           </div>
         </div>
       </div>

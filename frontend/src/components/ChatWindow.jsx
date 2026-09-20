@@ -1,333 +1,324 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
-  Wrench,
-  ChevronDown,
-  Maximize2,
-  Send,
-  Paperclip,
-  CheckCircle2,
-  AlertTriangle,
-  FileText,
-  Copy,
-  Bookmark,
-  ThumbsUp,
-  ThumbsDown,
-  ChevronRight,
-  ShieldAlert
+  Send, Paperclip, Zap, Bot, User, FileText,
+  AlertTriangle, CheckCircle2, Clock, Loader2, Download,
+  RefreshCw, ChevronDown, Compass, Eye
 } from 'lucide-react';
-import { sendChatMessage } from '../services/api';
+import { sendChatMessage, uploadDocument } from '../services/api';
 
-export default function ChatWindow({ activeModel, onNewResponse }) {
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
+/* Demo responses for when backend is offline */
+const DEMO_RESPONSES = [
+  {
+    answer: "Based on the equipment telemetry data retrieved from the knowledge base, the vibration anomaly in Compressor Unit C-204 indicates a **Level 2 bearing wear** pattern consistent with pages 14-17 of the Maintenance Manual.\n\n**Recommended Actions:**\n1. Schedule immediate inspection of bearing assembly\n2. Check lubrication levels — last service was 847 hours ago\n3. Monitor vibration amplitude (currently 4.2g, threshold is 5g)\n\n> [!NOTE] HITL approval required before scheduling shutdown.\n\n**Confidence:** 94.2% · Source: MaintManual_Rev3.pdf p.14-17",
+    citations: [{ doc: 'MaintManual_Rev3.pdf', page: 14, score: 0.94 }, { doc: 'TelemetryLog_C204.csv', page: 1, score: 0.88 }],
+    risk: 'medium',
+    model: 'Qwen2.5 7B',
+    tokens: 312,
+  },
+  {
+    answer: "The P&ID diagram for Section 7B has been analyzed using **Qwen2-VL vision model**. I identified:\n\n- **3 pressure relief valves** (PRV-7B-01, PRV-7B-02, PRV-7B-03)\n- **2 isolation valves** currently in CLOSED position\n- Heat exchanger HX-7B-A showing scaling deposits on eastern inlet\n\nAll findings are traceable to the uploaded document with pixel-level bounding box annotations.\n\n**Confidence:** 91.7% · Source: PID_Section7B_Rev2.pdf",
+    citations: [{ doc: 'PID_Section7B_Rev2.pdf', page: 3, score: 0.91 }],
+    risk: 'low',
+    model: 'Qwen2-VL 7B',
+    tokens: 248,
+  },
+  {
+    answer: "Code analysis complete. Found **2 critical issues** in the PLC ladder logic:\n\n```python\n# Issue 1 — Division by zero risk (Line 142)\nflow_rate = sensor_reading / time_delta  # time_delta can be 0\n\n# Fix:\nif time_delta > 0:\n    flow_rate = sensor_reading / time_delta\nelse:\n    flow_rate = 0.0\n```\n\nA **safety interlock bypass** was also detected at Line 891. This requires immediate review.\n\n**Risk Level: HIGH** — HITL approval gate triggered.",
+    citations: [{ doc: 'PLC_Logic_Rev5.py', page: 1, score: 0.99 }],
+    risk: 'high',
+    model: 'Qwen-Coder 7B',
+    tokens: 189,
+  },
+];
+
+let demoIdx = 0;
+
+function TypingIndicator() {
+  return (
+    <div className="wb-chat-msg assistant typing">
+      <div className="wb-msg-avatar"><Bot size={15} /></div>
+      <div className="wb-msg-bubble">
+        <span className="wb-typing-dot" /><span className="wb-typing-dot" /><span className="wb-typing-dot" />
+      </div>
+    </div>
+  );
+}
+
+function RiskBadge({ level }) {
+  const map = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' };
+  return (
+    <span className="wb-risk-badge" style={{ '--rc': map[level] || '#5a5a5a' }}>
+      {level === 'high' && <AlertTriangle size={10} />}
+      {level === 'medium' && <Clock size={10} />}
+      {level === 'low' && <CheckCircle2 size={10} />}
+      {(level || 'unknown').toUpperCase()}
+    </span>
+  );
+}
+
+function ChatMessage({ msg, onOpenHitl, onOpenDoc }) {
+  return (
+    <div className={`wb-chat-msg ${msg.role}`}>
+      <div className="wb-msg-avatar">
+        {msg.role === 'assistant' ? <Bot size={15} /> : <User size={15} />}
+      </div>
+      <div className="wb-msg-content">
+        <div className="wb-msg-bubble">
+          {/* Render markdown-ish content */}
+          {msg.text.split('\n').map((line, i) => {
+            if (line.startsWith('**') && line.endsWith('**')) {
+              return <p key={i}><strong>{line.slice(2, -2)}</strong></p>;
+            }
+            if (line.startsWith('> [!NOTE]')) {
+              return <div key={i} className="wb-msg-note">{line.slice(9).trim()}</div>;
+            }
+            if (line.startsWith('```')) return null;
+            if (line.match(/^(\d+)\. /)) {
+              return <p key={i} style={{ paddingLeft: '1rem' }}>{line}</p>;
+            }
+            if (line.startsWith('- ')) {
+              return <p key={i} style={{ paddingLeft: '1rem' }}>• {line.slice(2)}</p>;
+            }
+            if (line.trim()) return <p key={i}>{line}</p>;
+            return null;
+          })}
+
+          {msg.uploadedFile && (
+            <button
+              className="wb-uploaded-chip"
+              onClick={() => onOpenDoc?.(msg.uploadedFile)}
+              title="Click to view full uploaded document or drawing"
+            >
+              <Eye size={12} />
+              <span>Click to View Document ({msg.uploadedFile.title})</span>
+            </button>
+          )}
+        </div>
+
+        {msg.role === 'assistant' && msg.meta && (
+          <div className="wb-msg-meta">
+            <RiskBadge level={msg.meta.risk} />
+            <span className="wb-meta-pill"><Zap size={10} /> {msg.meta.model}</span>
+            <span className="wb-meta-pill">{msg.meta.tokens} tokens</span>
+            {msg.meta.citations?.length > 0 && (
+              <span className="wb-meta-pill citations">
+                <FileText size={10} /> {msg.meta.citations.length} source{msg.meta.citations.length !== 1 ? 's' : ''}
+              </span>
+            )}
+            {msg.meta.risk === 'high' && (
+              <button className="wb-hitl-trigger" onClick={onOpenHitl}>
+                <AlertTriangle size={10} /> Requires HITL Review
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function ChatWindow({
+  activeWorkspace,
+  activeModel,
+  setActiveModel,
+  onNewResponse,
+  currentUser,
+  onOpenHitl,
+  injectedQuery,
+  onClearInjectedQuery,
+  onOpenDoc
+}) {
   const [messages, setMessages] = useState([
     {
-      role: 'user',
-      content: 'P-204 is showing abnormal vibration. Can you diagnose the possible cause and recommend the next approved maintenance action?'
-    },
-    {
+      id: 1,
       role: 'assistant',
-      reply_title: 'Diagnosis Summary',
-      diagnosis_summary: 'P-204 is showing an abnormal vibration of 8.2 mm/s, which is above the critical threshold (>7.1 mm/s) as per SOP-017. Based on the available evidence, the most likely cause is bearing degradation, which could lead to increased vibration and potential failure if not addressed.',
-      metrics: {
-        vibration: '8.2 mm/s',
-        vibration_status: 'Critical',
-        threshold: '> 7.1 mm/s',
-        temp: '74 °C',
-        status: 'Running'
-      },
-      recommended_action: {
-        title: 'Schedule immediate inspection and maintenance',
-        sop: 'Follow SOP-017: Pump Maintenance',
-        requires_approval: true,
-        steps: [
-          'Verify sensor readings and confirm vibration trend.',
-          'Isolate and shut down the pump (requires approval).',
-          'Perform mechanical inspection (bearing, coupling, alignment).',
-          'Replace/repair as needed based on findings.'
-        ],
-        why_reasoning: [
-          'Vibration (8.2 mm/s) exceeds critical threshold (>7.1 mm/s) from SOP-017 (p.4).',
-          'Historical records show similar vibration pattern in the last 3 months (see Maintenance History).',
-          'P&ID confirms P-204 is a critical pump in the main line (see Plant_Piping_P204.pdf).',
-          'SOP requires inspection before any shutdowns.'
-        ]
-      },
-      citations: [
-        { document: 'SOP-017 - Pump Maintenance', page: 'Page 4 • Section 3.2', tag: 'CONFIDENTIAL', type: 'pdf' },
-        { document: 'P-204 Manual', page: 'Page 28 • Vibration Limits', tag: 'INTERNAL', type: 'doc' },
-        { document: 'Maintenance History', page: 'Page 6 • 12 Mar 2025', tag: 'RESTRICTED', type: 'doc' }
-      ]
+      text: `Hello ${currentUser?.name?.split(' ')[0] || 'Engineer'}, I'm AegisAI — your sovereign on-premise AI workbench. I'm operating in **${activeWorkspace}** mode.\n\nAll processing happens locally. Zero external API calls. How can I assist you today?`,
+      meta: null,
     }
   ]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef(null);
+  const fileRef = useRef(null);
 
-  const handleSend = async (e) => {
-    e.preventDefault();
-    if (!input.trim() || loading) return;
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
 
-    const userText = input;
-    setMessages((prev) => [...prev, { role: 'user', content: userText }]);
+  useEffect(() => {
+    if (injectedQuery) {
+      setInput(injectedQuery);
+      onClearInjectedQuery?.();
+    }
+  }, [injectedQuery]);
+
+  const handleSend = async () => {
+    const q = input.trim();
+    if (!q || loading) return;
     setInput('');
+
+    const userMsg = { id: Date.now(), role: 'user', text: q, meta: null };
+    setMessages(prev => [...prev, userMsg]);
     setLoading(true);
 
-    try {
-      const data = await sendChatMessage({
-        message: userText,
-        model_override: activeModel
-      });
+    // Try real API, fall back to demo
+    const history = messages.slice(-6).map(m => ({ role: m.role, content: m.text }));
+    const data = await sendChatMessage({ query: q, model: activeModel, workspace: activeWorkspace, history });
 
-      const assistantMsg = {
+    let assistantMsg;
+    if (data) {
+      assistantMsg = {
+        id: Date.now() + 1,
         role: 'assistant',
-        reply_title: data.reply_title || 'Analysis Summary',
-        diagnosis_summary: data.diagnosis_summary,
-        metrics: data.equipment_details
-          ? {
-              vibration: data.equipment_details.vibration_val,
-              vibration_status: data.equipment_details.vibration_status,
-              threshold: data.equipment_details.threshold,
-              temp: data.equipment_details.temp,
-              status: data.equipment_details.status
-            }
-          : null,
-        recommended_action: {
-          title: data.recommended_action.title,
-          sop: `Follow ${data.recommended_action.sop_code}`,
-          requires_approval: data.recommended_action.requires_approval,
-          steps: data.recommended_action.steps,
-          why_reasoning: data.recommended_action.why_reasoning
-        },
-        citations: data.citations.map((c) => ({
-          document: c.document,
-          page: `Page ${c.page}`,
-          tag: c.tag,
-          type: 'pdf'
-        }))
+        text: data.answer || data.response || 'Response received.',
+        meta: {
+          risk: data.risk_level || 'low',
+          model: data.model_used || activeModel,
+          tokens: data.tokens_used || 0,
+          citations: data.citations || [],
+        }
+      };
+    } else {
+      // Demo mode
+      const demo = DEMO_RESPONSES[demoIdx % DEMO_RESPONSES.length];
+      demoIdx++;
+      assistantMsg = {
+        id: Date.now() + 1,
+        role: 'assistant',
+        text: demo.answer,
+        meta: { risk: demo.risk, model: demo.model, tokens: demo.tokens, citations: demo.citations },
+      };
+    }
+
+    setMessages(prev => [...prev, assistantMsg]);
+    onNewResponse?.(assistantMsg);
+    setLoading(false);
+  };
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isImg = file.type.startsWith('image/');
+
+    const processUpload = (imgSrc = null) => {
+      const docItem = {
+        title: file.name,
+        doc: file.name,
+        tag: `UP-${Math.floor(1000 + Math.random() * 9000)}`,
+        discipline: file.name.toLowerCase().includes('pid') ? 'P&ID / Schematics' : 'Ingested File',
+        standard: 'Local ChromaDB Vector Vault',
+        imageSrc: imgSrc,
+        size: `${(file.size / 1024).toFixed(1)} KB`,
+        text: `Ingested document '${file.name}' (${(file.size / 1024).toFixed(1)} KB). Processed via Surya OCR & Qwen2-VL local vector pipeline.`
       };
 
-      setMessages((prev) => [...prev, assistantMsg]);
-      if (onNewResponse) onNewResponse(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+      const userMsg = {
+        id: Date.now(),
+        role: 'user',
+        text: `📎 Uploaded: ${file.name}`,
+        meta: null,
+        uploadedFile: docItem
+      };
+      setMessages(prev => [...prev, userMsg]);
+      setLoading(true);
+
+      uploadDocument(file, activeWorkspace).then(() => {
+        const resp = {
+          id: Date.now() + 1,
+          role: 'assistant',
+          text: `Document **${file.name}** has been ingested into the knowledge base. ChromaDB embeddings generated. Click below to view the full document content.`,
+          meta: { risk: 'low', model: 'Embedding Model', tokens: 0, citations: [{ doc: file.name, page: 1, score: 0.99 }] },
+          uploadedFile: docItem
+        };
+        setMessages(prev => [...prev, resp]);
+        setLoading(false);
+      });
+    };
+
+    if (isImg) {
+      const reader = new FileReader();
+      reader.onload = (ev) => processUpload(ev.target.result);
+      reader.readAsDataURL(file);
+    } else {
+      processUpload(null);
     }
+
+    e.target.value = '';
+  };
+
+  const handleClear = () => {
+    setMessages([{
+      id: Date.now(),
+      role: 'assistant',
+      text: `Session cleared. Ready for new queries in **${activeWorkspace}** mode.`,
+      meta: null,
+    }]);
   };
 
   return (
-    <div className="main-chat-area">
-      {/* Agent Banner Top */}
-      <div className="agent-banner">
-        <div className="agent-banner-left">
-          <div className="agent-avatar">
-            <Wrench size={18} />
-          </div>
-          <div>
-            <div className="agent-title-row">
-              <h2>Maintenance Intelligence Agent</h2>
-              <span className="online-badge">• Online</span>
-            </div>
-            <p className="agent-desc">
-              Diagnose equipment issues, provide SOP-based guidance, and recommend actions.
-            </p>
-          </div>
+    <main className="wb-chat">
+      {/* Chat header */}
+      <div className="wb-chat-topbar">
+        <div className="wb-chat-title">
+          <Bot size={17} />
+          <span>{activeWorkspace}</span>
         </div>
-
-        <div className="agent-banner-right">
-          <div className="model-selector-btn">
-            <div className="model-icon">🤖</div>
-            <span>{activeModel || 'Llama 3.1 8B'}</span>
-            <span className="sub-model">Local Model</span>
-            <ChevronDown size={14} />
-          </div>
-
-          <button className="tools-btn">
-            <span>Tools</span>
-            <ChevronDown size={14} />
+        <div className="wb-chat-topbar-actions">
+          <span className="wb-model-pill">
+            <Zap size={11} /> {activeModel}
+          </span>
+          <button className="wb-topbar-btn" onClick={handleClear} title="Clear chat">
+            <RefreshCw size={14} />
           </button>
-
-          <button className="icon-btn-ghost">
-            <Maximize2 size={16} />
+          <button className="wb-topbar-btn" title="Export chat">
+            <Download size={14} />
           </button>
         </div>
       </div>
 
-      {/* Messages Thread */}
-      <div className="chat-messages-container">
-        <div className="breadcrumb-nav">
-          <span>Maintenance Intelligence</span>
-          <ChevronRight size={14} />
-          <span className="active">P-204 Analysis</span>
-        </div>
-
-        {messages.map((msg, idx) => (
-          <div key={idx} className="message-wrapper">
-            {msg.role === 'user' ? (
-              <div className="user-message-row">
-                <div className="user-avatar-small">RJ</div>
-                <div className="user-bubble">
-                  {msg.content}
-                  <div className="time-stamp">Today, 14:32</div>
-                </div>
-              </div>
-            ) : (
-              <div className="assistant-message-card">
-                <div className="assistant-header-bar">
-                  <div className="agent-badge-icon">M</div>
-                  <div className="status-pill">
-                    <CheckCircle2 size={14} color="#10b981" />
-                    <span>Analysis complete</span>
-                  </div>
-                  <span className="dot-divider">•</span>
-                  <span className="trace-link">Thought process • 6 steps • 18.4s</span>
-                </div>
-
-                <div className="card-body-content">
-                  <h3 className="card-title">{msg.reply_title || 'Diagnosis Summary'}</h3>
-                  <p className="summary-paragraph">{msg.diagnosis_summary}</p>
-
-                  {/* Metrics Row */}
-                  {msg.metrics && (
-                    <div className="metrics-grid">
-                      <div className="metric-box">
-                        <div className="metric-label">Current Vibration</div>
-                        <div className="metric-value-row">
-                          <span className="metric-number">{msg.metrics.vibration}</span>
-                          <span className="badge-critical">{msg.metrics.vibration_status}</span>
-                        </div>
-                      </div>
-
-                      <div className="metric-box">
-                        <div className="metric-label">SOP Threshold</div>
-                        <div className="metric-value">{msg.metrics.threshold}</div>
-                      </div>
-
-                      <div className="metric-box">
-                        <div className="metric-label">Temperature</div>
-                        <div className="metric-value">{msg.metrics.temp}</div>
-                      </div>
-
-                      <div className="metric-box">
-                        <div className="metric-label">Status</div>
-                        <div className="status-running-row">
-                          <span className="running-dot" />
-                          <span>{msg.metrics.status}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Recommended Action Box */}
-                  {msg.recommended_action && (
-                    <div className="action-box">
-                      <div className="action-box-header">
-                        <div className="action-icon">
-                          <ShieldAlert size={20} color="#3b82f6" />
-                        </div>
-                        <div className="action-title-area">
-                          <h4>{msg.recommended_action.title}</h4>
-                          <span className="sop-text">{msg.recommended_action.sop}</span>
-                        </div>
-                        {msg.recommended_action.requires_approval && (
-                          <div className="approval-badge">
-                            <span>Requires Human Approval</span>
-                            <ChevronRight size={14} />
-                          </div>
-                        )}
-                      </div>
-
-                      <ol className="action-steps-list">
-                        {msg.recommended_action.steps.map((step, i) => (
-                          <li key={i}>{step}</li>
-                        ))}
-                      </ol>
-
-                      {/* Why reasoning dropdown/accordion */}
-                      <div className="why-accordion">
-                        <div className="accordion-header">
-                          <ChevronRight size={14} />
-                          <span>Why is this the recommendation?</span>
-                        </div>
-                        <ul className="why-list">
-                          {msg.recommended_action.why_reasoning.map((why, i) => (
-                            <li key={i}>{why}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Sources & Citations */}
-                  {msg.citations && msg.citations.length > 0 && (
-                    <div className="citations-section">
-                      <div className="citations-header">
-                        <span>Sources & Citations</span>
-                        <a href="#viewall" className="view-all-link">
-                          View all ({msg.citations.length})
-                        </a>
-                      </div>
-
-                      <div className="citations-cards-row">
-                        {msg.citations.map((c, i) => (
-                          <div key={i} className="citation-card-item">
-                            <FileText size={16} color="#f43f5e" />
-                            <div>
-                              <div className="citation-doc-name">{c.document}</div>
-                              <div className="citation-doc-page">{c.page}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Action buttons footer */}
-                      <div className="message-action-bar">
-                        <button className="action-btn-pill">
-                          <Copy size={13} />
-                          <span>Copy</span>
-                        </button>
-                        <button className="action-btn-pill">
-                          <Bookmark size={13} />
-                          <span>Save to Knowledge</span>
-                        </button>
-                        <div className="thumbs-group">
-                          <button className="icon-thumb">
-                            <ThumbsUp size={13} />
-                          </button>
-                          <button className="icon-thumb">
-                            <ThumbsDown size={13} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+      {/* Messages */}
+      <div className="wb-chat-messages">
+        {messages.map(msg => (
+          <ChatMessage key={msg.id} msg={msg} onOpenHitl={onOpenHitl} onOpenDoc={onOpenDoc} />
         ))}
+        {loading && <TypingIndicator />}
+        <div ref={bottomRef} />
       </div>
 
-      {/* Input Box Bottom */}
-      <form className="chat-input-container" onSubmit={handleSend}>
-        <button type="button" className="attach-btn">
-          <Paperclip size={18} />
+      {/* Input */}
+      <div className="wb-chat-input-area">
+        <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={handleFile} accept=".pdf,.png,.jpg,.jpeg,.txt,.csv,.py" />
+        <button className="wb-input-attach" onClick={() => fileRef.current?.click()} title="Upload document">
+          <Paperclip size={16} />
         </button>
-        <input
-          type="text"
-          className="main-prompt-input"
-          placeholder="Ask a follow-up question..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-        />
-        <div className="input-right-controls">
-          <div className="small-model-chip">
-            <span>Llama 3.1 8B</span>
-            <ChevronDown size={12} />
-          </div>
-          <button type="submit" className="send-btn-round" disabled={loading}>
-            <Send size={16} />
-          </button>
+        <button
+          className="wb-input-attach"
+          onClick={() => onOpenHitl?.('drawings')}
+          title="Open Engineering Drawings & Blueprints"
+          style={{ color: '#F3B250' }}
+        >
+          <Compass size={16} />
+        </button>
+        <div className="wb-input-wrap">
+          <textarea
+            className="wb-chat-input"
+            placeholder={`Query the ${activeWorkspace} knowledge base...`}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+            }}
+            rows={1}
+          />
         </div>
-      </form>
-    </div>
+        <button
+          className={`wb-send-btn${loading ? ' loading' : ''}`}
+          onClick={handleSend}
+          disabled={loading || !input.trim()}
+        >
+          {loading ? <Loader2 size={16} className="spin" /> : <Send size={16} />}
+        </button>
+      </div>
+    </main>
   );
 }
